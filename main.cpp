@@ -375,3 +375,12 @@ public:
         }
         return 0;
     };
+
+
+    //this code contains several mistakes, with bad application of physics principles for inertia and torques and drag , so we need to rework the parametres class and the dynamics class, 
+    //this explains why angles do not update correctly and why the rocket does not behave as expected, but it is a good starting point to understand how to structure the code and how to implement the
+    //RK4 method for numerical integration of the equations of motion.
+
+
+
+
