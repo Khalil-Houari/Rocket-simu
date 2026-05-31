@@ -1,8 +1,0 @@
-[
-{
-  "directory": "C:/Users/HP/Documents/rocketsim/build",
-  "command": "C:\\msys64\\ucrt64\\bin\\g++.exe   -g -std=gnu++17 -o CMakeFiles\\rocketsim.dir\\main.cpp.obj -c C:\\Users\\HP\\Documents\\rocketsim\\main.cpp",
-  "file": "C:/Users/HP/Documents/rocketsim/main.cpp",
-  "output": "CMakeFiles/rocketsim.dir/main.cpp.obj"
-}
-]

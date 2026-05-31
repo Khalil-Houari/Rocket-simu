@@ -1,3 +1,0 @@
-C:/Users/HP/Documents/rocketsim/build/CMakeFiles/rocketsim.dir
-C:/Users/HP/Documents/rocketsim/build/CMakeFiles/edit_cache.dir
-C:/Users/HP/Documents/rocketsim/build/CMakeFiles/rebuild_cache.dir
