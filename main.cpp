@@ -38,10 +38,9 @@ public:
     }
     V3 crossV_V(const V3& other) const {
         return V3(  other.z*y - other.y*z ,
-                    other.z*x - other.x*z ,
+                    other.x*z - other.z*x ,
                     other.y*x - other.x*y);
     }
-
 };
 
 class M3 {
@@ -383,13 +382,15 @@ class Rk4 {
 
     /* 
     *Done :
-    -now we have RK4 integrator for the rotation and translational 
+    -now we have RK4 integrator for the rotation and translational, I think that it is not coupled tho and the
+    errors are going to persist after some reflexion, we will rework the RK4 class to unify everything 
     -reworked all the algebra tools and some mathematical tools 
     -reworked the quaternion class to be more efficient and more accurate
     -finally finished with inertia tensors and parameters structure even tho we're still missing some parameters 
     -moddeled the the physics
     
     -Priorities :
+    *rework the RK4 method
     *model the atmosphere following the ISA 
     *model the thrust engine
     *execute the loop in the file 
