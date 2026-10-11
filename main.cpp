@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-float dt; // will be defined , it is not the time step for RK4 
+float dt =1 ; // will be defined , it is not the time step for RK4 
 bool state = false; // will be used to break the simulation incase of a bug detection or absurd value 
 
 class V3 {
@@ -41,7 +41,7 @@ public:
                     other.y*x - other.x*y);
     }
 };
-
+// thu
 class M3 {
     public:
         float m[3][3];
@@ -299,7 +299,7 @@ struct rocket_parameters { // still sketching
     V3 CoG_nanosat = pos_nanosat + V3(0,0,length_nanosat) / 2.0f; // we will assume that the nanosat is homogeneous and that it is placed at the end of the rocket
    
     float Cd; // drag coeff
-    float Rho; // air density
+
     float g; // gravity
     V3 CoP;
 };
@@ -307,8 +307,11 @@ struct rocket_parameters { // still sketching
 class rocket_state { // still sketching
     public:
     rocket_parameters p;
+
     quaternion orientation;
+
     V3 position;
+
     V3 velocity;
 
     V3 angular_velocity; 
@@ -317,6 +320,14 @@ class rocket_state { // still sketching
 
     V3 drag = V3(0,0,0);   // in the inertial frame
     
+    float Rho(float z) const { // here is the model of the atmosphee , there's temperature missing and pression which will be added later on 
+        float r; // density
+        float p; // pressure
+        if ( z < 11020 ) { r = 1.125f;}
+        else if  (z > 11019 && z < 20063  ) { r = 0.3639;}
+        else if  (z > 20062 && z < 32000   ) { r = 0.0880;}
+        return r;
+    }
 
     float mass_fuel; // we will update this one during the simulation
     float dm; // mass flow rate of the fuel
@@ -350,7 +361,7 @@ class rocket_state { // still sketching
 
     V3 get_d_drag() const { return p.CoP -  get_CoG();}
 
-    V3 angular_accel(V3 angular_vel) const {
+    V3 angular_accel(V3& angular_vel, quaternion& orientation) const {
         V3 drag_body =orientation.rotation().transpose() * drag;  // in the body frame      
         V3 d_thr =p.pos_motor  - get_CoG() ;
         V3 d_drag = get_d_drag();
@@ -359,10 +370,10 @@ class rocket_state { // still sketching
         V3 torque = d_thr.crossV_V(thrust) + d_drag.crossV_V(drag_body);
         return I_inv * (torque - angular_vel.crossV_V(I * angular_vel));
 }   
-    V3 accel(V3 velocity) const {
+    V3 accel(const V3& velocity, const V3& position, quaternion& orientation) const {
         V3 P = V3(0,0,-get_mass_total() * p.g);
-        float A = p.radius_ext * p.radius_ext * M_PI;
-        V3 drag =  velocity * velocity.magnitude() * p.Rho * p.Cd * A *-0.5f ;
+        float A = p.radius_ext * p.radius_ext * M_PI; // cross sectional area
+        V3 drag =  velocity * velocity.magnitude() * Rho(position.z) * p.Cd * A *-0.5f ;
         V3 thrust_inertial = orientation.rotation() * thrust; // in the inertial frame
         V3 accel = ( drag + thrust_inertial + P) / get_mass_total();
         return accel ; 
@@ -371,57 +382,85 @@ class rocket_state { // still sketching
 
 class Rk4 {
     public:
-    void rk4_rotational(rocket_state& s, float dt){
-        V3 k1 = s.angular_accel(s.angular_velocity);
-        V3 k2 = s.angular_accel(s.angular_velocity + k1*dt / 2.0f);
-        V3 k3 = s.angular_accel(s.angular_velocity + k2 * dt / 2.0f);
-        V3 k4 = s.angular_accel(s.angular_velocity + k3 * dt);
-        s.angular_velocity = s.angular_velocity + (k1 + k2 * 2.0f + k3 * 2.0f + k4) * (dt / 6.0f); 
-    }
-
-    static void rk4(quaternion& q,rocket_state& s, float dt) {
-        quaternion k1 = q.deriv(s.angular_velocity);
-        quaternion k2 = (q + k1 * dt / 2.0f).deriv(s.angular_velocity);
-        quaternion k3 = (q + k2 * dt / 2.0f).deriv(s.angular_velocity);
-        quaternion k4 = (q + k3 * dt).deriv(s.angular_velocity);
-        q = q + (k1 + k2 * 2.0f + k3 * 2.0f + k4) * (dt / 6.0f);
-        q.normalize();
-    }
-
-    void rk4_translational(rocket_state& s, float dt) {
-        V3 kv1 = s.accel(s.velocity);
-        V3 kv2 = s.accel(s.velocity + kv1 * dt / 2.0f);
-        V3 kv3 = s.accel(s.velocity + kv2 * dt / 2.0f);
-        V3 kv4 = s.accel(s.velocity + kv3 * dt);
+    rocket_state s;
+    void rk4(rocket_state& s, quaternion& q, float dt){
         
-        V3 kp1 = s.velocity;
-        V3 kp2 = s.velocity + kp1 * dt/2.0f;
-        V3 kp3 = s.velocity + kp2 * dt/2.0f;
-        V3 kp4 = s.velocity + kp3 * dt;
+        // initialization of the RK4 stages
+        quaternion q0 = q;
+        V3 w0 = s.angular_velocity;
+        V3 init_stage_p = s.position;
+        V3 init_stage_vel = s.velocity;
+        
+        // Stage 1
+        quaternion stage_q = q0;
+        V3 stage_w = w0;
+        V3 stage = init_stage_p;
+        V3 stage_vel = init_stage_vel;
 
-        s.velocity = s.velocity + (kv1 + kv2 * 2.0f + kv3 * 2.0f + kv4) * (dt / 6.0f);
-        s.position = s.position + (kp1 + kp2*2 + kp3*2 + kp4) * (dt/6.0f);
+        V3 Kv1 = s.accel(stage_vel, stage, stage_q);
+        V3 Kp1 = stage_vel;
+        quaternion kq1 = stage_q.deriv(stage_w);
+        V3 kw1 = s.angular_accel(stage_w, stage_q);
+        
+        //stage 2
+        stage_q = q0 + kq1 * dt / 2.0f;
+        stage_w = w0 + kw1 * dt / 2.0f;
+        stage = init_stage_p + Kp1 * dt / 2.0f;
+        stage_vel = init_stage_vel + Kv1 * dt / 2.0f;
+
+        V3 Kv2 = s.accel(stage_vel, stage, stage_q);
+        V3 Kp2 = stage_vel;
+        quaternion kq2 = stage_q.deriv(stage_w);
+        V3 kw2 = s.angular_accel(stage_w, stage_q);
+
+        //stage 3
+        stage_q = q0 + kq2 * dt / 2.0f;
+        stage_w = w0 + kw2 * dt / 2.0f;
+        stage = init_stage_p + Kp2 * dt / 2.0f;
+        stage_vel = init_stage_vel + Kv2 * dt / 2.0f;
+
+        V3 Kv3 = s.accel(stage_vel, stage, stage_q);
+        V3 Kp3 = stage_vel;
+        quaternion kq3 = stage_q.deriv(stage_w);
+        V3 kw3 = s.angular_accel(stage_w, stage_q);
+
+        //stage 4
+        stage_q = q0 + kq3 * dt;
+        stage_w = w0 + kw3 * dt;
+        stage = init_stage_p + Kp3 * dt;
+        stage_vel = init_stage_vel + Kv3 * dt;
+
+        V3 Kv4 = s.accel(stage_vel, stage, stage_q);
+        V3 Kp4 = stage_vel;
+        quaternion kq4 = stage_q.deriv(stage_w);
+        V3 kw4 = s.angular_accel(stage_w, stage_q);
+
+        // Final update
+        q = q + (kq1 + kq2 * 2.0f + kq3 * 2.0f + kq4) * (dt / 6.0f);
+        s.angular_velocity = s.angular_velocity + (kw1 + kw2 * 2.0f + kw3 * 2.0f + kw4) * (dt / 6.0f); 
+        s.velocity = s.velocity + (Kv1 + Kv2*2.0 + Kv3*2.0 + Kv4) * (dt / 6.0f);
+        s.position = s.position + (Kp1 + Kp2*2 + Kp3*2 + Kp4) * (dt/6.0f);
+        q.normalize();
     }
 };
 
-int main() {
-    for(;;) {
 
-    }
-}
 
     /* 
     *Done :
-    -now we have RK4 integrator for the rotation and translational
-    -reworked all the algebra tools and some mathematical tools 
+    -now we have RK4 integrator coupled assuming that the mass or fuel mass and drag are constant during 
+    the time step, we will rework it later on to be more accurate and more efficient 
+    -reworked all the mathematical tools 
     -reworked the quaternion class to be more efficient and more accurate
-    -finally finished with inertia tensors and parameters structure even tho we're still missing some parameters 
-    -moddeled the the physics
+    -finished with inertia tensors and parameters structure even tho we're still missing 
+    some parameters 
+    -moddeled the the physics (partially) of the rocket and the atmosphere density model
     
     -Priorities :
+    *couple drag and mass flow rate to the RK4 integrator
     *model the atmosphere following the ISA 
     *model the thrust engine
-    *execute the loop in the file 
+    *start testing in the terminal  
 
 
     -notes :
@@ -432,7 +471,7 @@ int main() {
     
     */
    
-    /* Last updated : 2026-06-18 */
+    /* Last updated : 2026-10-11 */
     
 
 
