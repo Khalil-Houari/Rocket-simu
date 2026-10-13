@@ -354,7 +354,7 @@ class rocket_state { // still sketching
 
         + inertia_rhead(p.density_shell, p.radius_ext, p.head_height) +steiner(p.mass_head, p.CoG_head- CoG) // head shell
 
-        + inertia_cyclindre(p.mass_FC, p.radius_FC*2, p.length_FC) +steiner(p.mass_FC,(p.CoG_FC-CoG))  // FC
+        + inertia_cyclindre(p.mass_FC, p.radius_FC, p.length_FC) +steiner(p.mass_FC,(p.CoG_FC-CoG))  // FC
 
         + inertia_parallelepiped(p.mass_nanosat, p.length_nanosat, p.width_nanosat, p.height_nanosat) +steiner(p.mass_nanosat,(p.CoG_nanosat - CoG)) // nanosat
         
@@ -387,8 +387,6 @@ class rocket_state { // still sketching
         return I_inv * (torque - angular_vel.crossV_V(I * angular_vel));
 }   
     V3 accel(
-        const V3& velocity, 
-        const V3& position, 
         const quaternion& orientation,
         const V3& drag_force,
         float fuel_mass) const {
@@ -403,7 +401,7 @@ class rocket_state { // still sketching
 class Rk4 { // important : we need to implement mass flow 
     public:
     rocket_state s;
-    void rk4(rocket_state& s, quaternion& q, float dt){
+    void rk4(rocket_state& s, float dt){
         
         // initialization of the RK4 stages
         float fuel_mass_init = s.mass_fuel;
@@ -423,7 +421,7 @@ class Rk4 { // important : we need to implement mass flow
         V3 stage_drag = s.drag_force(stage_vel, stage);
 
         float km1 = fuel_dm;
-        V3 Kv1 = s.accel(stage_vel, stage, stage_q, stage_drag, fuel_mass_stage);
+        V3 Kv1 = s.accel(stage_q, stage_drag, fuel_mass_stage);
         V3 Kp1 = stage_vel;
         quaternion kq1 = stage_q.deriv(stage_w);
         V3 kw1 = s.angular_accel(stage_w, stage_q, stage_drag, fuel_mass_stage);
@@ -438,7 +436,7 @@ class Rk4 { // important : we need to implement mass flow
         stage_drag = s.drag_force(stage_vel, stage);
 
         float km2 = fuel_dm;
-        V3 Kv2 = s.accel(stage_vel, stage, stage_q, stage_drag, fuel_mass_stage);
+        V3 Kv2 = s.accel(stage_q, stage_drag, fuel_mass_stage);
         V3 Kp2 = stage_vel;
         quaternion kq2 = stage_q.deriv(stage_w);
         V3 kw2 = s.angular_accel(stage_w, stage_q, stage_drag, fuel_mass_stage);
@@ -453,7 +451,7 @@ class Rk4 { // important : we need to implement mass flow
         stage_drag = s.drag_force(stage_vel, stage);
         
         float km3 = fuel_dm;
-        V3 Kv3 = s.accel(stage_vel, stage, stage_q, stage_drag, fuel_mass_stage);
+        V3 Kv3 = s.accel(stage_q, stage_drag, fuel_mass_stage);
         V3 Kp3 = stage_vel;
         quaternion kq3 = stage_q.deriv(stage_w);
         V3 kw3 = s.angular_accel(stage_w, stage_q, stage_drag, fuel_mass_stage);
@@ -468,7 +466,7 @@ class Rk4 { // important : we need to implement mass flow
         stage_drag = s.drag_force(stage_vel, stage);
 
         float km4 = fuel_dm;
-        V3 Kv4 = s.accel(stage_vel, stage, stage_q, stage_drag, fuel_mass_stage);
+        V3 Kv4 = s.accel(stage_q, stage_drag, fuel_mass_stage);
         V3 Kp4 = stage_vel;
         quaternion kq4 = stage_q.deriv(stage_w);
         V3 kw4 = s.angular_accel(stage_w, stage_q, stage_drag, fuel_mass_stage);
@@ -489,33 +487,54 @@ int main() {
     
 }
 
-    /* 
-    *Done :
-    -now we have RK4 integrator coupled 
-    the time step, we will rework it later on to be more accurate and more efficient 
-    -reworked all the mathematical tools 
-    -reworked the quaternion class to be more efficient and more accurate
-    -finished with inertia tensors and parameters structure even tho we're still missing 
-    some parameters 
-    -moddeled the the physics (partially) of the rocket and the atmosphere density model
-    -took in account mass flow rate 
-    -fixed the density model to be more accurate and more realistic
+        /*
+ * Done :
+     - RK4 integrator coupled: position, velocity, orientation, angular velocity and fuel mass
+   (mass flow rate included in the 4 stages)
+     - reworked the mathematical tools (V3, M3, quaternion): rotation matrix, quaternion
+   derivative and Euler's equation checked
+     - orientation now has a single source of truth (s.orientation), rk4 no longer takes q
+     - drag law checked: F = -0.5 * rho * Cd * A * |v| * v (opposite to v), assuming no wind
+     - the code compiles with -Wall -Wextra
+     - first draft of the inertia tensors and parameters structure (not validated yet)
+     - first draft of the atmosphere (constant steps, placeholder until ISA)
 
-    -Priorities :
-    *model the atmosphere following the ISA since we only approximate density and we don't have the temperature and pressure yet
-    *model the thrust engine
-    *start testing in the terminal  
+ * Priorities (before the first simulation) :
+     1. initialization: radius_int, Cog_shell, CoG_head, radius_FC, CoG_FC, CoG_nanosat are
+    computed before the fields are filled -> turn them into const methods, then fill
+    rocket_parameters in main
+     2. shell and head: CoG_head ignores pos_head; get_CoG must split body and head like the
+    inertia does; rework inertia_rhead (axis, CoG, mass); fix nanosat axes
+    (length on x in the inertia, on z in CoG_nanosat)
+    3. state guard: call is_valid(s) after every rk4 step and break the loop when state is true;
+    inverse() must stop dividing when it raises state; use a relative threshold instead of 1e-6f
+    4. fuel and thrust: init s.mass_fuel and s.dm from p, clamp fuel at 0, cut thrust when empty,
+    model the thrust engine
+    5. atmosphere: continuous ISA (density, temperature, pressure) instead of constant steps
+    6. start testing in the terminal: main loop with printf, then CSV + matplotlib
 
+ * Then :
+     - aerodynamic torque: angle of attack, normal force (CNalpha) and pitch damping
+     - normalize stage_q before rotation() in stages 2 to 4
+     - switch everything to double
+     - ground contact (z must not go below 0)
+     - unit tests: R*R^T = I, free fall without drag, energy and angular momentum conservation
+   in free rotation
+     - seperate the code into multiple files (math, physics, integrator, main)
+     - GUI / OpenGL only once the physics is validated
 
-    -notes :
-    *we're still treating some variating objects as constants such as the center of pressure 
-    *we don't have the drag coefficient graph yet so we assume it to be a constant
-    *the model got more accurate since we started not assuming everything to be symmetrical
-    *the file will be seperated into many files to ease the maintenance of the code/program
-    
+ * Notes :
+     - we're still treating some varying objects as constants such as the center of pressure
+     - we don't have the drag coefficient graph yet so we assume Cd to be constant
+     - dI/dt is ignored during the burn 
+     - the model got more accurate since we started not assuming everything to be symmetrical
+     - the file will be separated into many files to ease the maintenance of the code/program
+   (math, rocket, integrator, main)
     */
+
+        /* Last updated : 2026-10-13 */
    
-    /* Last updated : 2026-10-12 */
+
     
 
 
