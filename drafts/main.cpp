@@ -177,15 +177,15 @@ public:
         return R;
     }
 
-    V3 euler(V3 angle) { // teta, phi and gamma the rotation angles
-        angle.x = atan2(2 * (q0 * q1 + q2 * q3), 1 - 2 * (q1 * q1 + q2 * q2));
+    V3 euler() { // teta, phi and gamma the rotation angles
+        float x = atan2(2 * (q0 * q1 + q2 * q3), 1 - 2 * (q1 * q1 + q2 * q2));
         
         float sin_beta = 2 * (q0 * q2 - q3 * q1);
-        angle.y = asin(std::clamp(sin_beta, -0.999999f, 0.999999f)); 
+        float y  = asin(std::clamp(sin_beta, -0.999999f, 0.999999f)); 
 
-        angle.z = atan2(2 * (q0 * q3 + q1 * q2), 1 - 2 * (q2 * q2 + q3 * q3));
+        float z = atan2(2 * (q0 * q3 + q1 * q2), 1 - 2 * (q2 * q2 + q3 * q3));
 
-        return angle;
+        return V3(x, y, z);
     }
 
     quaternion deriv(V3 angular_vel) const {
@@ -258,7 +258,62 @@ M3 steiner(float mass, const V3& d) {
     result.m[2][2] = mass * (d.x * d.x + d.y * d.y); 
 
     return result;
-}
+}    
+
+
+float ISA(float z) {
+        float g = 9.80665f; // standard gravity
+        float R = 287.05f; // specific gas constant for dry air
+        float r = 6356766.0f; // radius of the earth
+        float hg = (r*z)/(r+z); // geopotential altitude
+        float d, T, P;
+        //troposphere
+        float hb = 0.0f;
+        float Tb = 288.15f;
+        float Lb = -0.0065f;
+        float Pb = 101325.0f;
+        //tropopause
+        if (hg >= 11000.0f && hg < 20000.0f) { 
+            hb = 11000.0f;
+            Tb = 216.65f;
+            Lb = 0.000f;
+            Pb = 22632.1f;
+        }
+        //stratosphere (lower)
+        else if (hg >= 20000.0f && hg < 32000.0f) { 
+            hb = 20000.0f;
+            Tb = 216.65f;
+            Lb = 0.0010f;
+            Pb = 5474.89f;
+        }
+        //stratosphere (upper)
+        else if (hg >= 32000.0f && hg < 47000.0f) { 
+            hb = 32000.0f;
+            Tb = 228.65f;
+            Lb = 0.0028f;
+            Pb = 868.02f;
+        }
+        //stratopause
+        else if (hg >= 47000.0f && hg < 51000.0f){ 
+            hb = 47000.0f;
+            Tb = 270.65f;
+            Lb = 0.0f;
+            Pb = 110.91f;
+        }
+        // isothermal layer
+        if (Lb == 0.0f) {
+            T = Tb;
+            P = Pb * exp(-1.0f * g * (hg- hb)/ (Tb * R));
+        } else {
+        // gradient layer
+        T = Tb + Lb * (hg - hb);
+        P = Pb * pow(Tb / T, g / (Lb * R));
+    }
+    d = P / (R * T); // density
+    return d; // Note : we can notice that we're only returning the density, 
+            //but we can also return the temperature and pressure if needed
+    }
+
 
 struct rocket_parameters { // still sketching 
     //shell parameters
@@ -318,60 +373,6 @@ class rocket_state { // still sketching
     V3 thrust; // in the body frame
 
     V3 drag = V3(0,0,0);   // in the inertial frame
-
-
-    float ISA(float z) const {
-        float g = 9.80665f; // standard gravity
-        float R = 287.05f; // specific gas constant for dry air
-        float r = 6356766.0f; // radius of the earth
-        float hg = (r*z)/(r+z); // geopotential altitude
-        float d, T, P;
-        //troposphere
-        float hb = 0.0f;
-        float Tb = 288.15f;
-        float Lb = -0.0065f;
-        float Pb = 101325.0f;
-        //tropopause
-        if (hg >= 11000.0f && hg < 20000.0f) { 
-            hb = 11000.0f;
-            Tb = 216.65f;
-            Lb = 0.000f;
-            Pb = 22632.1f;
-        }
-        //stratosphere (lower)
-        else if (hg >= 20000.0f && hg < 32000.0f) { 
-            hb = 20000.0f;
-            Tb = 216.65f;
-            Lb = 0.0010f;
-            Pb = 5474.89f;
-        }
-        //stratosphere (upper)
-        else if (hg >= 32000.0f && hg < 47000.0f) { 
-            hb = 32000.0f;
-            Tb = 228.65f;
-            Lb = 0.0028f;
-            Pb = 868.02f;
-        }
-        //stratopause
-        else if (hg >= 47000.0f && hg < 51000.0f){ 
-            hb = 47000.0f;
-            Tb = 270.65f;
-            Lb = 0.0f;
-            Pb = 110.91f;
-        }
-        // isothermal layer
-        if (Lb == 0.0f) {
-            T = Tb;
-            P = Pb * exp(-1.0f * g * (hg- hb)/ (Tb * R));
-        } else {
-        // gradient layer
-        T = Tb + Lb * (hg - hb);
-        P = Pb * pow(Tb / T, g / (Lb * R));
-    }
-    d = P / (R * T); // density
-    return d; // Note : we can notice that we're only returning the density, 
-            //but we can also return the temperature and pressure if needed
-    }
 
     float mass_fuel; // we will update this one during the simulation
     float dm; // mass flow rate of the fuel
@@ -558,33 +559,53 @@ class rocket_state { // still sketching
         s.position = s.position + (Kp1 + Kp2*2 + Kp3*2 + Kp4) * (dt/6.0f);
         s.orientation.normalize();
     }
-
+/*
 int main() {
     float dt = 0 ;
-    float step = 1.0f; // Time step for the simulation
-    V3 rotation_angles(0, 0, 0); // Initialize rotation angles to zero
+    float step = 0.01f;              // Time step for the simulation
+    float altitude_limit = 0.0f;            // Store the maximum altitude reached
+    V3 rotation_angles(0, 0, 0);    // Initialize rotation angles to zero
     rocket_state s;
     s.position = V3(0, 0, 0);
-    s.orientation = quaternion(1, 0, 0, 0);
+    s.orientation = quaternion(1, 0.9 , 0.5 , 0.2); // Example initial orientation
     s.velocity = V3(0, 0, 0);
-    s.thrust = V3(0, 0, 1000.0f); // Example thrust value
-    s.mass_fuel = 19.0f; // Initial fuel mass
+    s.thrust = V3(0, 0, 1000.0f);   // Example thrust value
+    s.mass_fuel = 19.0f;            // Initial fuel mass
     s.angular_velocity = V3(0, 0, 0);
-    s.dm = 0.46f; // Example mass flow rate
-
+    s.dm = 0.46f;                   // Example mass flow rate
+    s.orientation.normalize(); // Normalize the quaternion to ensure it's a valid rotation
     M3 rot = s.orientation.rotation();
     M3 rot_transpose = rot.transpose();
     M3 result = rot * rot_transpose;
+    const float tolerance = 1e-5f;
+    bool orthogonal = true;
 
-    printf(result.m[0][0] == 1.0f && result.m[1][1] == 1.0f && result.m[2][2] == 1.0f ? "Rotation matrix is orthogonal.\n" : "Rotation matrix is NOT orthogonal.\n");
-            /* /////////////////////////////
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            const float expected = (i == j) ? 1.0f : 0.0f;
+            if (std::abs(result.m[i][j] - expected) > tolerance) {
+                orthogonal = false;
+            }
+        }
+    }
 
+    if (state) {
+        printf("Invalid state detected during rotation matrix calculation.\n");
+    }
+    printf(orthogonal
+        ? "Rotation matrix is orthogonal.\n"
+        : "Rotation matrix is NOT orthogonal.\n");
+          
+/*
     while (s.position.z >= 0.0f && !state) { // Run until the rocket hits the ground or an invalid state is detected
-        s.orientation.euler(rotation_angles); // Update Euler angles for output
+        rotation_angles = s.orientation.euler(); // Update Euler angles for output
         s.drag = s.drag_force(s.velocity, s.position);
         if (s.mass_fuel <= 0.0f) {
             s.thrust = V3(0, 0, 0); // No thrust if fuel is depleted
             s.dm = 0.0f; // Stop fuel consumption
+        }
+        if (s.position.z > altitude_limit)  {
+            altitude_limit = s.position.z; // Update maximum altitude reached
         }
     rk4(s, step);
     std::cout << "step : "<< dt<< "s || tPosition: (" << s.position.x << ", " << s.position.y << ", " << s.position.z << ") \n";
@@ -593,12 +614,14 @@ int main() {
     std::cout << "thrust: (" << s.thrust.x << ", " << s.thrust.y << ", " << s.thrust.z << " || drag : " << s.drag.x << "," << s.drag.y << "," <<s.drag.z<< " \n";
     std::cout <<"Fuel mass:" << s.mass_fuel<<"kg\n";
     std::cout << "--------------------------------------------------------------" << std::endl;
-    dt += 0.1f; // Increment time step for the next iteration
+    dt += step; // Increment time step for the next iteration
 }
 
-            /////////////////////*/ 
-}
+printf("MAXIMUM REACHED : %.2f m\n", altitude_limit);
+    return 0;
 
+}
+*/
 /*
  * Done:
          - V3, M3 and quaternion implemented.
